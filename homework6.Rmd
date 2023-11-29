@@ -1,0 +1,30 @@
+---
+title: "Homework6"
+author: "Danny Nguyen"
+date: "2023-11-29"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Question 1 
+
+```{r}
+homicide <- read_csv("homicide-data.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    city_state = str_c(city, state, sep = ","),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct(victim_race),
+    result = ifelse(disposition == "Closed by arrest", 1, 0)) %>% 
+  group_by(city_state)%>% 
+  filter(city_state != "Tulsa,AL" & city_state!="Dallas,TX" & city_state != "Phoenix,AZ" & city_state!="Kansas City,MO")%>% 
+  filter(victim_race == "White" | victim_race =="Black") %>%
+  select(city_state, result, victim_age, victim_race, victim_sex)
+```
+
