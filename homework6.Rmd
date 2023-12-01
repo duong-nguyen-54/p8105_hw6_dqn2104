@@ -23,7 +23,7 @@ homicide <- read_csv("homicide-data.csv") %>%
     victim_race = fct(victim_race),
     result = ifelse(disposition == "Closed by arrest", 1, 0)) %>% 
   group_by(city_state)%>% 
-  filter(city_state != "Tulsa,AL" & city_state!="Dallas,TX" & city_state != "Phoenix,AZ" & city_state!="Kansas City,MO")%>% 
+  filter(city_state != "Tulsa,AL" & city_state!= "Dallas,TX" & city_state != "Phoenix,AZ" & city_state!="Kansas City,MO")%>% 
   filter(victim_race == "White" | victim_race =="Black") %>%
   select(city_state, result, victim_age, victim_race, victim_sex)
 
@@ -61,13 +61,14 @@ OR = homicide %>%
 
 OR
 ```
+Comparing male victims to female victims, the adjusted OR is 0.426 suggesting that in Baltimore, MD, the odds of solving a homicide for male victims are 0.426 times the the odds of solving a homicide for female victims controlling for other factors. We are 95% confident that this true OR lies between 0.325 and 0.558. The confidence interval does not include 1 meaning that a statistically significant difference.
 
 ```{r}
 OR %>% 
   ggplot(aes(x = fct_reorder(city_state, OR), y = OR)) +
   geom_point() + 
   geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci)) + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
+  theme(axis.text.x = element_text(angle = 90))+
   labs(
     x = "City",
     y = "Adjusted OR",
@@ -75,3 +76,97 @@ OR %>%
   )
 ```
 
+# Question 2 
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2022-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+```
+
+```{r}
+fit_model <- lm(tmax ~ tmin + prcp, data = weather_df)
+
+set.seed(123456)
+
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+
+boot_straps = 
+  data_frame(
+    strap_number = 1:5000,
+    strap_sample = rerun(5000, boot_sample(weather_df))
+  )
+
+bootstrap_results = 
+  boot_straps %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin + prcp, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(results) 
+
+log_betas <-  
+  bootstrap_results %>%
+  group_by(strap_number) %>%
+  summarise(log_betas = log(estimate[2] * estimate[3])) %>%
+  select(log_betas, strap_number)
+
+bootstrap_results2 <- 
+  boot_straps %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin + prcp, data = .x) ),
+    results = map(models, broom::glance)) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(results) 
+
+r_squared <- 
+  bootstrap_results2 %>%
+  select(r.squared, strap_number)
+```
+
+#### Fitting density plot of 2 estimates 
+```{r}
+ggplot(r_squared, aes(x = r.squared)) + 
+  geom_density() +
+  labs(title = "R-squared Distribution") +
+  theme_minimal()
+
+ggplot(log_betas, aes(x = log_betas)) + 
+  geom_density() +
+  labs(title = "Distribution of log(Beta1 * Beta2)") +
+  theme_minimal()
+
+r_squared %>%
+  summarise(r_squared_sd = sd(r.squared), 
+            r_squared_mean = mean(r.squared)) %>%
+  pull(r_squared_sd, r_squared_mean)
+
+log_betas %>% 
+  summarise(log_betas_sd = sd(as.numeric(log_betas),na.rm = TRUE),
+           log_betas_mean = mean(as.numeric(log_betas), na.rm = TRUE) ) %>%
+  pull(log_betas_sd, log_betas_mean) 
+```
+The r-squared values are normally distributed, as the mean of `r r_squared$r_squared_mean` with SD of `r r_squared$r_squared_sd`, meaning a consistent model fit across bootstrap samples. Meanwhile, the distribution for log(B1*B2) is left-skewed with a mean of `r log_betas$log_betas_mean`with SD of `r log_betas$log_betas_sd`. 
+
+```{r}
+CI_result <- log_betas %>%
+  summarize(ci_lower = quantile(log_betas, 0.025, na.rm = TRUE),
+            ci_upper = quantile(log_betas, 0.975, na.rm = TRUE))
+```
+The 95% CI is (`r CI_result$ci_lower`, `r CI_result$ci_upper`)
+
+# Question 3 
+```{r}
+birthweight <- read_csv("birthweight.csv")
+
+
+```
