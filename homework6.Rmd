@@ -145,17 +145,17 @@ ggplot(log_betas, aes(x = log_betas)) +
   labs(title = "Distribution of log(Beta1 * Beta2)") +
   theme_minimal()
 
-r_squared %>%
+r_squared1 = r_squared %>%
   summarise(r_squared_sd = sd(r.squared), 
             r_squared_mean = mean(r.squared)) %>%
   pull(r_squared_sd, r_squared_mean)
 
-log_betas %>% 
+log_betas1 = log_betas %>% 
   summarise(log_betas_sd = sd(as.numeric(log_betas),na.rm = TRUE),
            log_betas_mean = mean(as.numeric(log_betas), na.rm = TRUE) ) %>%
   pull(log_betas_sd, log_betas_mean) 
 ```
-The r-squared values are normally distributed, as the mean of `r r_squared$r_squared_mean` with SD of `r r_squared$r_squared_sd`, meaning a consistent model fit across bootstrap samples. Meanwhile, the distribution for log(B1*B2) is left-skewed with a mean of `r log_betas$log_betas_mean`with SD of `r log_betas$log_betas_sd`. 
+The r-squared values are normally distributed, as the mean of `0.917` with SD of `0.0136`, meaning a consistent model fit across bootstrap samples. Meanwhile, the distribution for log(B1*B2) is left-skewed with a mean of `-6.116` with SD of `1.164`. 
 
 ```{r}
 CI_result <- log_betas %>%
@@ -168,5 +168,119 @@ The 95% CI is (`r CI_result$ci_lower`, `r CI_result$ci_upper`)
 ```{r}
 birthweight <- read_csv("birthweight.csv")
 
+birthweight %>% 
+  janitor::clean_names() %>% 
+   mutate(babysex = ifelse(babysex == "1", "male","female"),
+         malform = ifelse(malform == "0", "absent","present"),
+         frace = recode(frace, "1" = "White", "2" = "Black", "3" = "Asian", 
+                        "4" = "Puerto Rican", "8" = "Other", "9" = "Unknown"),
+         mrace = recode(mrace, "1" = "White", "2" = "Black", 
+                        "3" = "Asian", "4" = "Puerto Rican", "8" = "Other")) %>%
+   mutate(babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace),
+    parity = as.factor(parity),
+    pnumlbw = as.factor(pnumlbw),
+    pnumsga = as.factor(pnumsga))
+
+skimr::skim(birthweight)
+```
+As We check the dataset and find that there are no missing data, then we perform series of `mutate()` to get appropriate data types as well as how they should be formatted for the regression analysis. The dataset contains 4342 rows and 20 columns in total. 
+
+```{r}
+first_model = lm(bwt ~ ., data = birthweight)
+summary(first_model)
+
+step(first_model, direction = 'both')
+```
+I utilize stepwise selection, and it shows that the best fit model should include: `babysex, bhead, blength, delwt, fincome, gaweeks, menarche, mheight, momage,  mrace, parity, ppwt, smoken`. 
+
+```{r}
+better_model = lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data = birthweight)
+summary(better_model)%>%
+  broom::tidy() %>%
+  select(term, estimate, p.value)
+
+summary(better_model)%>%
+  broom::glance()
+```
+We can see that all variables have significant p-values (<0.05). At the same time, the chosen model has the adjusted r-squared of 0.710 explaining that 71.0% variability in birthweight can be explained by these variables.  All variables are highly significant with strong associations to birthweight.
+
+```{r}
+birthweight %>% 
+  modelr::add_residuals(first_model) %>%
+  modelr::add_predictions(better_model) %>% 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point(alpha = 0.3) +
+  labs(
+    title = "Residuals vs Chosen Fitted Plot for Birthweight Model",
+    x = "Fiited values",
+    y = "Residuals"
+    ) +
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_line(aes(y = 0), color = "blue")
 
 ```
+The “Residuals vs Chosen Fitted Plot for Birthweight Model” indicates that the residuals are randomly distributed around the horizontal line at 0.
+
+```{r}
+model1 = lm(bwt ~ blength + gaweeks, data = birthweight)
+
+model2 = lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = birthweight)
+```
+
+```{r}
+set.seed(234567)
+
+cross_validation = 
+  modelr::crossv_mc(birthweight, 100)
+  
+
+cv = cross_validation %>%
+   mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+cv_df <- 
+  cross_validation %>%
+   mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+
+cv_df <-
+  cv_df %>%
+    mutate(
+    my_model= map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data = .x)),
+    model_length_gaweeks = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    model_interactions  = map(train, ~lm(bwt ~ (bhead + blength + babysex)^3, data = .x))
+    ) %>%
+   mutate(
+    rmse_my_model = map2_dbl(my_model, test, ~modelr::rmse(model = .x, data = .y)),
+    rmse_length_gaweeks = map2_dbl(model_length_gaweeks, test, ~modelr::rmse(model = .x, data = .y)),
+    rmse_interactions = map2_dbl(model_interactions, test, ~modelr::rmse(model = .x, data = .y))
+   )
+```
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse, color=model)) + 
+  geom_violin() +   geom_boxplot(alpha = 0.5)+
+  labs(title = 
+  "Prediction Error Distributions across Models", 
+       x = "Models", y = "RMSE") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+According to the plot, `my_model` seems to be potentially the best model due to the fact that it has the lowest RSME, following with `interaction` model then `length_gaweeks` model. 
+
+
+
+
