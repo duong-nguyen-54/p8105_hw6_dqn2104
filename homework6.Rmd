@@ -2,7 +2,7 @@
 title: "Homework6"
 author: "Danny Nguyen"
 date: "2023-11-29"
-output: html_document
+output: github_document
 editor_options: 
   chunk_output_type: console
 ---
